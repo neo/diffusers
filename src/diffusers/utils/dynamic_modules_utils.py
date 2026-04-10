@@ -323,8 +323,10 @@ def get_cached_module_file(
             segments = model_dir_name.split("--")
             # segments = ["models", "org", "repo"] (or more if the repo name contains "--")
             pretrained_model_name_or_path = segments[1] + "/" + "--".join(segments[2:])
-            submodule = os.path.join("local", "--".join(pretrained_model_name_or_path.split("/")))
-            # Extract the commit hash that sits right after "snapshots/"
+            submodule = os.path.join("local", "--".join(segments[1:]))
+            # Extract the commit hash that sits right after "snapshots/".
+            # If the path structure is unexpected, commit_hash stays None and
+            # falls back to the model_info() API call below.
             commit_hash = parts[2] if len(parts) > 2 and parts[1] == "snapshots" else None
         else:
             submodule = "local"
