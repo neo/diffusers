@@ -96,12 +96,26 @@ def _extract_repo_id_from_cache_path(path: str | os.PathLike) -> str | None:
         inside a HuggingFace cache directory, or ``None`` otherwise.
     """
     for part in Path(str(path)).parts:
+        # Known HuggingFace Hub repo-type prefixes.  If new types are added
+        # upstream this list will need to be extended.
         if part.startswith(("models--", "datasets--", "spaces--")):
-            # Split on the HuggingFace Hub separator ('--') and skip the repo-type prefix.
-            # E.g. 'models--org--repo' -> ['models', 'org', 'repo'] -> 'org/repo'
+            # Split on the HuggingFace Hub separator ('--') and skip the
+            # repo-type prefix.  A repo ID has at most one '/' (between the
+            # namespace and the name), so only the *first* '--' after the
+            # type prefix is treated as the namespace/name separator; any
+            # remaining '--' are kept as literal characters in the name.
+            #
+            # Examples:
+            #   'models--org--repo'       -> 'org/repo'
+            #   'models--repo'            -> 'repo'
+            #   'models--org--my--repo'   -> 'org/my--repo'
             segments = part.split("--")
-            if len(segments) >= 2:
-                return "/".join(segments[1:])
+            if len(segments) == 2:
+                # No namespace, just a repo name.
+                return segments[1]
+            elif len(segments) >= 3:
+                # namespace / repo-name (repo-name may itself contain '--')
+                return segments[1] + "/" + "--".join(segments[2:])
     return None
 
 
