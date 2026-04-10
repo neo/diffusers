@@ -79,6 +79,32 @@ def create_dynamic_module(name: str | os.PathLike):
         init_path.touch()
 
 
+def _extract_repo_id_from_cache_path(path: str | os.PathLike) -> str | None:
+    """Extract a HuggingFace Hub repo ID from a cached file path, if possible.
+
+    HuggingFace Hub cache paths follow the pattern:
+        ``{cache_dir}/{type}s--{org}--{repo}/snapshots/{commit_hash}/...``
+
+    For example, ``~/.cache/huggingface/hub/models--myorg--myrepo/snapshots/abc123/...``
+    corresponds to the repo ID ``myorg/myrepo``.
+
+    Args:
+        path (`str` or `os.PathLike`): The local file or directory path to inspect.
+
+    Returns:
+        `str` or `None`: The repo ID (e.g. ``"myorg/myrepo"``) if the path is
+        inside a HuggingFace cache directory, or ``None`` otherwise.
+    """
+    for part in Path(str(path)).parts:
+        if part.startswith(("models--", "datasets--", "spaces--")):
+            # Split on the HuggingFace Hub separator ('--') and skip the repo-type prefix.
+            # E.g. 'models--org--repo' -> ['models', 'org', 'repo'] -> 'org/repo'
+            segments = part.split("--")
+            if len(segments) >= 2:
+                return "/".join(segments[1:])
+    return None
+
+
 def get_relative_imports(module_file):
     """
     Get the list of modules that are relatively imported in a module file.
@@ -304,9 +330,18 @@ def get_cached_module_file(
     else:
         module_file_or_url = os.path.join(pretrained_model_name_or_path, module_file)
 
-    if os.path.isfile(module_file_or_url):
+    is_local = os.path.isfile(module_file_or_url)
+    if is_local:
         resolved_module_file = module_file_or_url
-        submodule = "local"
+        # When the local path originates from the HuggingFace Hub cache (e.g. a
+        # custom component downloaded as part of a whole pipeline), extract the
+        # repo ID so the submodule name matches the one produced when the same
+        # component is loaded individually via AutoModel.
+        repo_id = _extract_repo_id_from_cache_path(pretrained_model_name_or_path)
+        if repo_id is not None:
+            submodule = os.path.join("local", "--".join(repo_id.split("/")))
+        else:
+            submodule = "local"
     elif pretrained_model_name_or_path.count("/") == 0:
         available_versions = get_diffusers_versions()
         # cut ".dev0"
@@ -375,7 +410,7 @@ def get_cached_module_file(
     full_submodule = DIFFUSERS_DYNAMIC_MODULE_NAME + os.path.sep + submodule
     create_dynamic_module(full_submodule)
     submodule_path = Path(HF_MODULES_CACHE) / full_submodule
-    if submodule == "local" or submodule == "git":
+    if is_local or submodule == "git":
         # We always copy local files (we could hash the file to see if there was a change, and give them the name of
         # that hash, to only copy when there is a modification but it seems overkill for now).
         # The only reason we do the copy is to avoid putting too many folders in sys.path.
