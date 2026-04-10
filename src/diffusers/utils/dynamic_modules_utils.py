@@ -315,11 +315,8 @@ def get_cached_module_file(
         # HF cache layout: {hf_cache}/models--{org}--{repo}/snapshots/{hash}/…
         hf_cache = str(cache_dir) if cache_dir is not None else HF_HUB_CACHE
         hf_cache_prefix = os.path.join(hf_cache, "models--")
-        if pretrained_model_name_or_path.startswith(hf_cache_prefix):
-            model_name, _, commit_hash, _ = pretrained_model_name_or_path.replace(hf_cache_prefix, "").split(
-                os.sep, 3
-            )
-            pretrained_model_name_or_path = model_name.replace("--", "/", 1)
+        if module_file_or_url.startswith(hf_cache_prefix):
+            model_name, _, commit_hash, _ = module_file_or_url.replace(hf_cache_prefix, "").split(os.sep, 3)
             submodule = os.path.join("local", model_name)
         else:
             submodule = "local"
