@@ -217,10 +217,10 @@ def get_class_in_module(class_name, module_path, force_reload=False):
             module_spec.loader.exec_module(module)
             module.__diffusers_module_hash__ = module_hash
 
-        if class_name is None:
-            return find_pipeline_class(module)
+    if class_name is None:
+        return find_pipeline_class(module)
 
-        return getattr(module, class_name)
+    return getattr(module, class_name)
 
 
 def find_pipeline_class(loaded_module):
