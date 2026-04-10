@@ -27,6 +27,7 @@ from types import ModuleType
 from urllib import request
 
 from huggingface_hub import hf_hub_download, model_info
+from huggingface_hub.constants import HF_HUB_CACHE
 from huggingface_hub.utils import RevisionNotFoundError, validate_hf_hub_args
 from packaging import version
 
@@ -77,46 +78,6 @@ def create_dynamic_module(name: str | os.PathLike):
     init_path = dynamic_module_path / "__init__.py"
     if not init_path.exists():
         init_path.touch()
-
-
-def _extract_repo_id_from_cache_path(path: str | os.PathLike) -> str | None:
-    """Extract a HuggingFace Hub repo ID from a cached file path, if possible.
-
-    HuggingFace Hub cache paths follow the pattern:
-        ``{cache_dir}/{type}s--{org}--{repo}/snapshots/{commit_hash}/...``
-
-    For example, ``~/.cache/huggingface/hub/models--myorg--myrepo/snapshots/abc123/...``
-    corresponds to the repo ID ``myorg/myrepo``.
-
-    Args:
-        path (`str` or `os.PathLike`): The local file or directory path to inspect.
-
-    Returns:
-        `str` or `None`: The repo ID (e.g. ``"myorg/myrepo"``) if the path is
-        inside a HuggingFace cache directory, or ``None`` otherwise.
-    """
-    for part in Path(str(path)).parts:
-        # Known HuggingFace Hub repo-type prefixes.  If new types are added
-        # upstream this list will need to be extended.
-        if part.startswith(("models--", "datasets--", "spaces--")):
-            # Split on the HuggingFace Hub separator ('--') and skip the
-            # repo-type prefix.  A repo ID has at most one '/' (between the
-            # namespace and the name), so only the *first* '--' after the
-            # type prefix is treated as the namespace/name separator; any
-            # remaining '--' are kept as literal characters in the name.
-            #
-            # Examples:
-            #   'models--org--repo'       -> 'org/repo'
-            #   'models--repo'            -> 'repo'
-            #   'models--org--my--repo'   -> 'org/my--repo'
-            segments = part.split("--")
-            if len(segments) == 2:
-                # No namespace, just a repo name.
-                return segments[1]
-            elif len(segments) >= 3:
-                # namespace / repo-name (repo-name may itself contain '--')
-                return segments[1] + "/" + "--".join(segments[2:])
-    return None
 
 
 def get_relative_imports(module_file):
@@ -338,22 +299,33 @@ def get_cached_module_file(
     """
     # Download and cache module_file from the repo `pretrained_model_name_or_path` of grab it if it's a local file.
     pretrained_model_name_or_path = str(pretrained_model_name_or_path)
+    commit_hash = None
 
     if subfolder is not None:
         module_file_or_url = os.path.join(pretrained_model_name_or_path, subfolder, module_file)
     else:
         module_file_or_url = os.path.join(pretrained_model_name_or_path, module_file)
 
-    is_local = os.path.isfile(module_file_or_url)
-    if is_local:
+    if os.path.isfile(module_file_or_url):
         resolved_module_file = module_file_or_url
-        # When the local path originates from the HuggingFace Hub cache (e.g. a
-        # custom component downloaded as part of a whole pipeline), extract the
-        # repo ID so the submodule name matches the one produced when the same
-        # component is loaded individually via AutoModel.
-        repo_id = _extract_repo_id_from_cache_path(pretrained_model_name_or_path)
-        if repo_id is not None:
-            submodule = os.path.join("local", "--".join(repo_id.split("/")))
+        # When the local path is inside the HuggingFace Hub cache (e.g. a custom
+        # component downloaded as part of a whole pipeline via snapshot_download),
+        # extract the repo ID and commit hash so the submodule name and versioning
+        # match the behaviour of loading the component individually via AutoModel.
+        # HF cache layout: {HF_HUB_CACHE}/models--{org}--{repo}/snapshots/{hash}/…
+        hf_cache_prefix = os.path.join(HF_HUB_CACHE, "models--")
+        if pretrained_model_name_or_path.startswith(hf_cache_prefix):
+            # Extract the "models--org--repo" directory name and derive the repo id.
+            relative = pretrained_model_name_or_path[len(HF_HUB_CACHE) :].strip(os.sep)
+            parts = relative.split(os.sep)
+            # parts[0] = "models--org--repo", parts[1] = "snapshots", parts[2] = commit_hash, …
+            model_dir_name = parts[0]  # e.g. "models--org--repo"
+            segments = model_dir_name.split("--")
+            # segments = ["models", "org", "repo"] (or more if the repo name contains "--")
+            pretrained_model_name_or_path = segments[1] + "/" + "--".join(segments[2:])
+            submodule = os.path.join("local", "--".join(pretrained_model_name_or_path.split("/")))
+            # Extract the commit hash that sits right after "snapshots/"
+            commit_hash = parts[2] if len(parts) > 2 and parts[1] == "snapshots" else None
         else:
             submodule = "local"
     elif pretrained_model_name_or_path.count("/") == 0:
@@ -424,7 +396,7 @@ def get_cached_module_file(
     full_submodule = DIFFUSERS_DYNAMIC_MODULE_NAME + os.path.sep + submodule
     create_dynamic_module(full_submodule)
     submodule_path = Path(HF_MODULES_CACHE) / full_submodule
-    if is_local or submodule == "git":
+    if submodule == "local" or submodule == "git":
         # We always copy local files (we could hash the file to see if there was a change, and give them the name of
         # that hash, to only copy when there is a modification but it seems overkill for now).
         # The only reason we do the copy is to avoid putting too many folders in sys.path.
@@ -444,7 +416,8 @@ def get_cached_module_file(
     else:
         # Get the commit hash
         # TODO: we will get this info in the etag soon, so retrieve it from there and not here.
-        commit_hash = model_info(pretrained_model_name_or_path, revision=revision, token=token).sha
+        if commit_hash is None:
+            commit_hash = model_info(pretrained_model_name_or_path, revision=revision, token=token).sha
 
         # The module file will end up being placed in a subfolder with the git hash of the repo. This way we get the
         # benefit of versioning.
