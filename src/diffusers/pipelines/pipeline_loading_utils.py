@@ -360,22 +360,18 @@ def maybe_raise_or_warn(
     passed_class_obj,
     name,
     is_pipeline_module,
-    pipelines=None,
-    cached_folder=None,
+    cache_dir=None,
 ):
     """Simple helper method to raise or warn in case incorrect module has been passed"""
     if not is_pipeline_module:
-        if pipelines is None:
-            from diffusers import pipelines
-
         class_obj, class_candidates = get_class_obj_and_candidates(
             library_name,
             class_name,
             importable_classes,
-            pipelines,
+            None,
             is_pipeline_module,
             component_name=name,
-            cache_dir=cached_folder,
+            cache_dir=cache_dir,
         )
 
         expected_class_obj = None
@@ -680,8 +676,7 @@ def _get_final_device_map(device_map, pipeline_class, passed_class_obj, init_dic
                 passed_class_obj,
                 name,
                 is_pipeline_module,
-                pipelines=pipelines,
-                cached_folder=kwargs.get("cached_folder", None),
+                cache_dir=kwargs.get("cached_folder", None),
             )
             with accelerate.init_empty_weights():
                 loaded_sub_model = passed_class_obj[name]

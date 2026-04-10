@@ -1042,8 +1042,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
                     passed_class_obj,
                     name,
                     is_pipeline_module,
-                    pipelines=pipelines,
-                    cached_folder=cached_folder,
+                    cache_dir=cached_folder,
                 )
 
                 loaded_sub_model = passed_class_obj[name]
