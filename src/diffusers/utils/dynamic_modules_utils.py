@@ -312,22 +312,15 @@ def get_cached_module_file(
         # component downloaded as part of a whole pipeline via snapshot_download),
         # extract the repo ID and commit hash so the submodule name and versioning
         # match the behaviour of loading the component individually via AutoModel.
-        # HF cache layout: {HF_HUB_CACHE}/models--{org}--{repo}/snapshots/{hash}/…
-        hf_cache_prefix = os.path.join(HF_HUB_CACHE, "models--")
+        # HF cache layout: {hf_cache}/models--{org}--{repo}/snapshots/{hash}/…
+        hf_cache = str(cache_dir) if cache_dir is not None else HF_HUB_CACHE
+        hf_cache_prefix = os.path.join(hf_cache, "models--")
         if pretrained_model_name_or_path.startswith(hf_cache_prefix):
-            # Extract the "models--org--repo" directory name and derive the repo id.
-            relative = pretrained_model_name_or_path[len(HF_HUB_CACHE) :].strip(os.sep)
-            parts = relative.split(os.sep)
-            # parts[0] = "models--org--repo", parts[1] = "snapshots", parts[2] = commit_hash, …
-            model_dir_name = parts[0]  # e.g. "models--org--repo"
-            segments = model_dir_name.split("--")
-            # segments = ["models", "org", "repo"] (or more if the repo name contains "--")
-            pretrained_model_name_or_path = segments[1] + "/" + "--".join(segments[2:])
-            submodule = os.path.join("local", "--".join(segments[1:]))
-            # Extract the commit hash that sits right after "snapshots/".
-            # If the path structure is unexpected, commit_hash stays None and
-            # falls back to the model_info() API call below.
-            commit_hash = parts[2] if len(parts) > 2 and parts[1] == "snapshots" else None
+            model_name, _, commit_hash, _ = pretrained_model_name_or_path.replace(hf_cache_prefix, "").split(
+                os.sep, 3
+            )
+            pretrained_model_name_or_path = model_name.replace("--", "/", 1)
+            submodule = os.path.join("local", model_name)
         else:
             submodule = "local"
     elif pretrained_model_name_or_path.count("/") == 0:
